@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: services
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-service
+          image: ayushneosoft/goodsharing-user-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4001
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: DB_URL
+            - name: JWT_SECRET
+              value: "super-secret-key"
+          volumeMounts:
+            - name: db-ca-cert
+              mountPath: /app/certs
+              readOnly: true
+      volumes:
+        - name: db-ca-cert
+          secret:
+            secretName: user-db-ca    

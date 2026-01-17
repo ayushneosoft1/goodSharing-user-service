@@ -20,5 +20,5 @@ startStandaloneServer(server, {
     };
   },
 }).then(() => {
-  console.log("User-service running on http://0.0.0.0:4001/graphql");
+  console.log("User Service running on http://0.0.0.0:4001/graphql");
 });

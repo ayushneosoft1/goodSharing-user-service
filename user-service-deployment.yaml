@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: user-service
-          image: ayushneosoft/goodsharing-user-service:latest
+          image: ayushneosoft/goodsharing-user-service:v1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 4001

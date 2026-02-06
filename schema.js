@@ -2,13 +2,18 @@ import gql from "graphql-tag";
 
 export const typeDefs = gql`
   type Query {
-    # Query API 1
     getUserDetails: UserResponse
+    getAllUserDetails: UsersResponse
   }
 
   type Mutation {
     # Mutation API 1
-    signup(email: String!, password: String!, name: String!): ApiResponse
+    signup(
+      email: String!
+      password: String!
+      first_name: String!
+      last_name: String!
+    ): ApiResponse
 
     # Mutation API 2
     signin(email: String!, password: String!): ApiResponse
@@ -20,10 +25,17 @@ export const typeDefs = gql`
     data: User
   }
 
+  type UsersResponse {
+    status: Int!
+    statusMessage: String!
+    data: [User!]
+  }
+
   type User @key(fields: "id") {
     id: ID!
     email: String!
-    name: String!
+    first_name: String!
+    last_name: String!
   }
 
   type ApiResponse {

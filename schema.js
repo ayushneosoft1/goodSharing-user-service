@@ -20,13 +20,13 @@ export const typeDefs = gql`
   }
 
   type UserResponse {
-    status: Int!
+    status: String!
     statusMessage: String!
     data: User
   }
 
   type UsersResponse {
-    status: Int!
+    status: String!
     statusMessage: String!
     data: [User!]
   }
@@ -39,7 +39,7 @@ export const typeDefs = gql`
   }
 
   type ApiResponse {
-    status: Int!
+    status: String!
     statusMessage: String!
     data: AuthData
   }

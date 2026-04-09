@@ -4,6 +4,9 @@ import { buildSubgraphSchema } from "@apollo/subgraph";
 import { typeDefs } from "./schema.js";
 import { resolvers } from "./resolvers.js";
 
+import dotenv from "dotenv";
+dotenv.config();
+
 const server = new ApolloServer({
   schema: buildSubgraphSchema([{ typeDefs, resolvers }]),
 });

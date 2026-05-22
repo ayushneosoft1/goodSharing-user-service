@@ -4,15 +4,30 @@ import { pool } from "./db.js";
 import { redis } from "./redis.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const CACHE_TTL = 7 * 24 * 60 * 60; // 604800 seconds (7 days)
+const CACHE_TTL = 604800;
 
-console.log("JWT_SECRET:", JWT_SECRET);
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET missing in .env");
+}
+
+const generateToken = (user) => {
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+    },
+    JWT_SECRET,
+    {
+      expiresIn: "1d",
+    },
+  );
+};
 
 export const resolvers = {
   Query: {
-    async getUserDetails(parent, args, context) {
+    async getUserDetails(_, __, context) {
       try {
-        if (!context.user) {
+        if (!context?.user) {
           return {
             status: "FAILED",
             statusMessage: "Unauthorized",
@@ -20,26 +35,36 @@ export const resolvers = {
           };
         }
 
-        const userId = context.user.id;
-        const cacheKey = `user:id:${userId}`;
+        const cacheKey = `user:${context.user.id}`;
 
-        const cachedUser = await redis.get(cacheKey);
-        if (cachedUser) {
+        const cached = await redis.get(cacheKey);
+
+        if (cached !== null) {
+          console.log("User Cache HIT");
+
           return {
             status: "SUCCESS",
-            statusMessage: "User fetched from cache",
-            data: JSON.parse(cachedUser),
+            statusMessage: "Fetched successfully",
+            data: JSON.parse(cached),
           };
         }
 
+        console.log("User Cache MISS");
+
         const { rows } = await pool.query(
-          "SELECT id, email, first_name, last_name FROM users WHERE id = $1",
-          [userId],
+          `
+          SELECT
+            id,
+            email,
+            first_name,
+            last_name
+          FROM users
+          WHERE id=$1
+          `,
+          [context.user.id],
         );
 
-        const user = rows[0];
-
-        if (!user) {
+        if (!rows[0]) {
           return {
             status: "FAILED",
             statusMessage: "User not found",
@@ -47,14 +72,18 @@ export const resolvers = {
           };
         }
 
+        const user = rows[0];
+
         await redis.set(cacheKey, JSON.stringify(user), "EX", CACHE_TTL);
 
         return {
           status: "SUCCESS",
-          statusMessage: "User fetched successfully",
+          statusMessage: "Fetched successfully",
           data: user,
         };
       } catch (err) {
+        console.error("Get User Error:", err);
+
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
@@ -65,16 +94,44 @@ export const resolvers = {
 
     async getAllUserDetails() {
       try {
+        const cacheKey = "users:all";
+
+        const cached = await redis.get(cacheKey);
+
+        if (cached !== null) {
+          console.log("Users Cache HIT");
+
+          return {
+            status: "SUCCESS",
+            statusMessage: "Fetched successfully",
+            data: JSON.parse(cached),
+          };
+        }
+
+        console.log("Users Cache MISS");
+
         const { rows } = await pool.query(
-          "SELECT id, email, first_name, last_name FROM users",
+          `
+            SELECT
+              id,
+              email,
+              first_name,
+              last_name
+            FROM users
+            ORDER BY id DESC
+            `,
         );
+
+        await redis.set(cacheKey, JSON.stringify(rows), "EX", CACHE_TTL);
 
         return {
           status: "SUCCESS",
-          statusMessage: "Users fetched successfully",
+          statusMessage: "Fetched successfully",
           data: rows,
         };
       } catch (err) {
+        console.error("Get Users Error:", err);
+
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
@@ -84,41 +141,68 @@ export const resolvers = {
     },
   },
 
-  // ✅ FIXED: Mutation OUTSIDE Query
   Mutation: {
     async signup(_, { email, password, first_name, last_name }) {
-      console.log(" SIGNUP RESOLVER CALLED");
-
       try {
         const normalizedEmail = email.trim().toLowerCase();
+
+        const firstName = first_name.trim();
+
+        const lastName = last_name.trim();
+
+        const { rows: existing } = await pool.query(
+          `
+            SELECT id
+            FROM users
+            WHERE email=$1
+            `,
+          [normalizedEmail],
+        );
+
+        if (existing.length > 0) {
+          return {
+            status: "FAILED",
+            statusMessage: "Email already exists",
+            data: null,
+          };
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const { rows } = await pool.query(
-          `INSERT INTO users (email, password, first_name, last_name)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id, email, first_name, last_name`,
-          [normalizedEmail, hashedPassword, first_name, last_name],
+          `
+            INSERT INTO users
+            (
+              email,
+              password,
+              first_name,
+              last_name
+            )
+            VALUES($1,$2,$3,$4)
+
+            RETURNING
+              id,
+              email,
+              first_name,
+              last_name
+            `,
+          [normalizedEmail, hashedPassword, firstName, lastName],
         );
 
         const user = rows[0];
 
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-          expiresIn: "1d",
-        });
+        await redis.del("users:all");
 
         return {
-          status: "SUCCESS", // ✅ FIXED
+          status: "SUCCESS",
           statusMessage: "Signup successful",
-          data: { token, user },
+          data: {
+            token: generateToken(user),
+            user,
+          },
         };
       } catch (err) {
-        if (err.code === "23505") {
-          return {
-            status: "FAILED",
-            statusMessage: "Email already registered",
-            data: null,
-          };
-        }
+        console.error("Signup Error:", err);
 
         return {
           status: "FAILED",
@@ -133,13 +217,20 @@ export const resolvers = {
         const normalizedEmail = email.trim().toLowerCase();
 
         const { rows } = await pool.query(
-          "SELECT * FROM users WHERE email = $1",
+          `
+            SELECT
+              id,
+              email,
+              password,
+              first_name,
+              last_name
+            FROM users
+            WHERE email=$1
+            `,
           [normalizedEmail],
         );
 
-        const user = rows[0];
-
-        if (!user) {
+        if (!rows[0]) {
           return {
             status: "FAILED",
             statusMessage: "Invalid credentials",
@@ -147,9 +238,11 @@ export const resolvers = {
           };
         }
 
-        const isValid = await bcrypt.compare(password, user.password);
+        const user = rows[0];
 
-        if (!isValid) {
+        const valid = await bcrypt.compare(password, user.password);
+
+        if (!valid) {
           return {
             status: "FAILED",
             statusMessage: "Invalid credentials",
@@ -164,18 +257,17 @@ export const resolvers = {
           last_name: user.last_name,
         };
 
-        const token = jwt.sign(
-          { id: safeUser.id, email: safeUser.email },
-          JWT_SECRET,
-          { expiresIn: "1d" },
-        );
-
         return {
-          status: "SUCCESS", // ✅ FIXED
+          status: "SUCCESS",
           statusMessage: "Signin successful",
-          data: { token, user: safeUser },
+          data: {
+            token: generateToken(user),
+            user: safeUser,
+          },
         };
       } catch (err) {
+        console.error("Signin Error:", err);
+
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
@@ -186,12 +278,41 @@ export const resolvers = {
   },
 
   User: {
-    async __resolveReference(ref) {
-      const { rows } = await pool.query(
-        "SELECT id, email, first_name, last_name FROM users WHERE id = $1",
-        [ref.id],
-      );
-      return rows[0] || null;
+    async __resolveReference(reference) {
+      try {
+        const cacheKey = `user:${reference.id}`;
+
+        const cached = await redis.get(cacheKey);
+
+        if (cached !== null) {
+          return JSON.parse(cached);
+        }
+
+        const { rows } = await pool.query(
+          `
+            SELECT
+              id,
+              email,
+              first_name,
+              last_name
+            FROM users
+            WHERE id=$1
+            `,
+          [reference.id],
+        );
+
+        if (!rows[0]) {
+          return null;
+        }
+
+        await redis.set(cacheKey, JSON.stringify(rows[0]), "EX", CACHE_TTL);
+
+        return rows[0];
+      } catch (err) {
+        console.error("Reference Error:", err);
+
+        return null;
+      }
     },
   },
 };

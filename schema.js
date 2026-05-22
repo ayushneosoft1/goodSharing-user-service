@@ -7,7 +7,6 @@ export const typeDefs = gql`
   }
 
   type Mutation {
-    # Mutation API 1
     signup(
       email: String!
       password: String!
@@ -15,8 +14,14 @@ export const typeDefs = gql`
       last_name: String!
     ): ApiResponse
 
-    # Mutation API 2
     signin(email: String!, password: String!): ApiResponse
+  }
+
+  type User @key(fields: "id") {
+    id: ID!
+    email: String!
+    first_name: String!
+    last_name: String!
   }
 
   type UserResponse {
@@ -31,21 +36,14 @@ export const typeDefs = gql`
     data: [User!]
   }
 
-  type User @key(fields: "id") {
-    id: ID!
-    email: String!
-    first_name: String!
-    last_name: String!
+  type AuthData {
+    token: String!
+    user: User!
   }
 
   type ApiResponse {
     status: String!
     statusMessage: String!
     data: AuthData
-  }
-
-  type AuthData {
-    token: String!
-    user: User!
   }
 `;

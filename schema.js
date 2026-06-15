@@ -3,7 +3,10 @@ import gql from "graphql-tag";
 export const typeDefs = gql`
   type Query {
     getUserDetails: UserResponse
+
     getAllUserDetails: UsersResponse
+
+    getPushTokens(userIds: [ID!]!): [PushToken!]!
   }
 
   type Mutation {
@@ -15,6 +18,10 @@ export const typeDefs = gql`
     ): ApiResponse
 
     signin(email: String!, password: String!): ApiResponse
+
+    savePushToken(token: String!): Boolean!
+
+    removePushToken(token: String!): Boolean!
   }
 
   type User @key(fields: "id") {
@@ -22,6 +29,11 @@ export const typeDefs = gql`
     email: String!
     first_name: String!
     last_name: String!
+  }
+
+  type PushToken {
+    userId: ID!
+    pushToken: String!
   }
 
   type UserResponse {

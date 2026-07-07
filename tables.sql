@@ -60,7 +60,23 @@ ADD COLUMN last_name TEXT;
 
 */
 
+CREATE TABLE user_push_tokens
+(
+  id BIGSERIAL PRIMARY KEY,
 
+  user_id BIGINT NOT NULL,
 
+  push_token TEXT NOT NULL UNIQUE,
+
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_push_token_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_push_tokens_user
+ON user_push_tokens(user_id);
 
 

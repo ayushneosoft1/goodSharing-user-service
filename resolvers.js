@@ -1,10 +1,11 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+
 import { pool } from "./db.js";
 import { redis } from "./redis.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const CACHE_TTL = 604800;
+const CACHE_TTL = 604800; // 7 days
 
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET missing in .env");
@@ -17,9 +18,7 @@ const generateToken = (user) => {
       email: user.email,
     },
     JWT_SECRET,
-    {
-      expiresIn: "1d",
-    },
+    { expiresIn: "1d" },
   );
 };
 
@@ -38,10 +37,7 @@ export const resolvers = {
         const cacheKey = `user:${context.user.id}`;
 
         const cached = await redis.get(cacheKey);
-
-        if (cached !== null) {
-          console.log("User Cache HIT");
-
+        if (cached) {
           return {
             status: "SUCCESS",
             statusMessage: "Fetched successfully",
@@ -49,22 +45,16 @@ export const resolvers = {
           };
         }
 
-        console.log("User Cache MISS");
-
         const { rows } = await pool.query(
           `
-          SELECT
-            id,
-            email,
-            first_name,
-            last_name
+          SELECT id, email, first_name, last_name
           FROM users
-          WHERE id=$1
+          WHERE id = $1
           `,
           [context.user.id],
         );
 
-        if (!rows[0]) {
+        if (!rows.length) {
           return {
             status: "FAILED",
             statusMessage: "User not found",
@@ -72,18 +62,15 @@ export const resolvers = {
           };
         }
 
-        const user = rows[0];
-
-        await redis.set(cacheKey, JSON.stringify(user), "EX", CACHE_TTL);
+        await redis.set(cacheKey, JSON.stringify(rows[0]), "EX", CACHE_TTL);
 
         return {
           status: "SUCCESS",
           statusMessage: "Fetched successfully",
-          data: user,
+          data: rows[0],
         };
       } catch (err) {
-        console.error("Get User Error:", err);
-
+        console.error("getUserDetails Error:", err);
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
@@ -97,10 +84,7 @@ export const resolvers = {
         const cacheKey = "users:all";
 
         const cached = await redis.get(cacheKey);
-
-        if (cached !== null) {
-          console.log("Users Cache HIT");
-
+        if (cached) {
           return {
             status: "SUCCESS",
             statusMessage: "Fetched successfully",
@@ -108,19 +92,11 @@ export const resolvers = {
           };
         }
 
-        console.log("Users Cache MISS");
-
-        const { rows } = await pool.query(
-          `
-            SELECT
-              id,
-              email,
-              first_name,
-              last_name
-            FROM users
-            ORDER BY id DESC
-            `,
-        );
+        const { rows } = await pool.query(`
+          SELECT id, email, first_name, last_name
+          FROM users
+          ORDER BY id DESC
+        `);
 
         await redis.set(cacheKey, JSON.stringify(rows), "EX", CACHE_TTL);
 
@@ -130,13 +106,49 @@ export const resolvers = {
           data: rows,
         };
       } catch (err) {
-        console.error("Get Users Error:", err);
-
+        console.error("getAllUserDetails Error:", err);
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
           data: null,
         };
+      }
+    },
+
+    async getPushTokens(_, { userIds }, context) {
+      try {
+        const isInternalRequest =
+          context?.serviceSecret &&
+          context.serviceSecret === process.env.INTERNAL_SERVICE_SECRET;
+
+        if (!isInternalRequest && !context?.user) {
+          throw new Error("Unauthorized");
+        }
+
+        if (!Array.isArray(userIds) || userIds.length === 0) {
+          return [];
+        }
+
+        const cleanUserIds = userIds
+          .map((id) => Number(id))
+          .filter((id) => !Number.isNaN(id));
+
+        const { rows } = await pool.query(
+          `
+          SELECT user_id, push_token
+          FROM user_push_tokens
+          WHERE user_id = ANY($1::bigint[])
+          `,
+          [cleanUserIds],
+        );
+
+        return rows.map((row) => ({
+          userId: row.user_id,
+          pushToken: row.push_token,
+        }));
+      } catch (err) {
+        console.error("getPushTokens Error:", err);
+        return [];
       }
     },
   },
@@ -146,20 +158,14 @@ export const resolvers = {
       try {
         const normalizedEmail = email.trim().toLowerCase();
 
-        const firstName = first_name.trim();
-
-        const lastName = last_name.trim();
-
         const { rows: existing } = await pool.query(
           `
-            SELECT id
-            FROM users
-            WHERE email=$1
-            `,
+          SELECT id FROM users WHERE email = $1
+          `,
           [normalizedEmail],
         );
 
-        if (existing.length > 0) {
+        if (existing.length) {
           return {
             status: "FAILED",
             statusMessage: "Email already exists",
@@ -171,25 +177,17 @@ export const resolvers = {
 
         const { rows } = await pool.query(
           `
-            INSERT INTO users
-            (
-              email,
-              password,
-              first_name,
-              last_name
-            )
-            VALUES($1,$2,$3,$4)
-
-            RETURNING
-              id,
-              email,
-              first_name,
-              last_name
-            `,
-          [normalizedEmail, hashedPassword, firstName, lastName],
+          INSERT INTO users (email, password, first_name, last_name)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id, email, first_name, last_name
+          `,
+          [
+            normalizedEmail,
+            hashedPassword,
+            first_name.trim(),
+            last_name.trim(),
+          ],
         );
-
-        const user = rows[0];
 
         await redis.del("users:all");
 
@@ -197,13 +195,12 @@ export const resolvers = {
           status: "SUCCESS",
           statusMessage: "Signup successful",
           data: {
-            token: generateToken(user),
-            user,
+            token: generateToken(rows[0]),
+            user: rows[0],
           },
         };
       } catch (err) {
-        console.error("Signup Error:", err);
-
+        console.error("signup Error:", err);
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
@@ -218,19 +215,14 @@ export const resolvers = {
 
         const { rows } = await pool.query(
           `
-            SELECT
-              id,
-              email,
-              password,
-              first_name,
-              last_name
-            FROM users
-            WHERE email=$1
-            `,
+          SELECT id, email, password, first_name, last_name
+          FROM users
+          WHERE email = $1
+          `,
           [normalizedEmail],
         );
 
-        if (!rows[0]) {
+        if (!rows.length) {
           return {
             status: "FAILED",
             statusMessage: "Invalid credentials",
@@ -240,9 +232,9 @@ export const resolvers = {
 
         const user = rows[0];
 
-        const valid = await bcrypt.compare(password, user.password);
+        const isValidPassword = await bcrypt.compare(password, user.password);
 
-        if (!valid) {
+        if (!isValidPassword) {
           return {
             status: "FAILED",
             statusMessage: "Invalid credentials",
@@ -250,29 +242,67 @@ export const resolvers = {
           };
         }
 
-        const safeUser = {
-          id: user.id,
-          email: user.email,
-          first_name: user.first_name,
-          last_name: user.last_name,
-        };
-
         return {
           status: "SUCCESS",
           statusMessage: "Signin successful",
           data: {
             token: generateToken(user),
-            user: safeUser,
+            user: {
+              id: user.id,
+              email: user.email,
+              first_name: user.first_name,
+              last_name: user.last_name,
+            },
           },
         };
       } catch (err) {
-        console.error("Signin Error:", err);
-
+        console.error("signin Error:", err);
         return {
           status: "FAILED",
           statusMessage: "Internal server error",
           data: null,
         };
+      }
+    },
+
+    async savePushToken(_, { token }, context) {
+      try {
+        if (!context?.user) throw new Error("Unauthorized");
+
+        if (!token || typeof token !== "string") return false;
+
+        await pool.query(
+          `
+          INSERT INTO user_push_tokens (user_id, push_token)
+          VALUES ($1, $2)
+          ON CONFLICT (user_id, push_token) DO NOTHING
+          `,
+          [context.user.id, token],
+        );
+
+        return true;
+      } catch (err) {
+        console.error("savePushToken Error:", err);
+        return false;
+      }
+    },
+
+    async removePushToken(_, { token }, context) {
+      try {
+        if (!context?.user) throw new Error("Unauthorized");
+
+        await pool.query(
+          `
+          DELETE FROM user_push_tokens
+          WHERE user_id = $1 AND push_token = $2
+          `,
+          [context.user.id, token],
+        );
+
+        return true;
+      } catch (err) {
+        console.error("removePushToken Error:", err);
+        return false;
       }
     },
   },
@@ -283,34 +313,24 @@ export const resolvers = {
         const cacheKey = `user:${reference.id}`;
 
         const cached = await redis.get(cacheKey);
-
-        if (cached !== null) {
-          return JSON.parse(cached);
-        }
+        if (cached) return JSON.parse(cached);
 
         const { rows } = await pool.query(
           `
-            SELECT
-              id,
-              email,
-              first_name,
-              last_name
-            FROM users
-            WHERE id=$1
-            `,
+          SELECT id, email, first_name, last_name
+          FROM users
+          WHERE id = $1
+          `,
           [reference.id],
         );
 
-        if (!rows[0]) {
-          return null;
-        }
+        if (!rows.length) return null;
 
         await redis.set(cacheKey, JSON.stringify(rows[0]), "EX", CACHE_TTL);
 
         return rows[0];
       } catch (err) {
-        console.error("Reference Error:", err);
-
+        console.error("User Reference Error:", err);
         return null;
       }
     },

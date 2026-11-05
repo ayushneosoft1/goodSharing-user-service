@@ -115,42 +115,7 @@ export const resolvers = {
       }
     },
 
-    async getPushTokens(_, { userIds }, context) {
-      try {
-        const isInternalRequest =
-          context?.serviceSecret &&
-          context.serviceSecret === process.env.INTERNAL_SERVICE_SECRET;
 
-        if (!isInternalRequest && !context?.user) {
-          throw new Error("Unauthorized");
-        }
-
-        if (!Array.isArray(userIds) || userIds.length === 0) {
-          return [];
-        }
-
-        const cleanUserIds = userIds
-          .map((id) => Number(id))
-          .filter((id) => !Number.isNaN(id));
-
-        const { rows } = await pool.query(
-          `
-          SELECT user_id, push_token
-          FROM user_push_tokens
-          WHERE user_id = ANY($1::bigint[])
-          `,
-          [cleanUserIds],
-        );
-
-        return rows.map((row) => ({
-          userId: row.user_id,
-          pushToken: row.push_token,
-        }));
-      } catch (err) {
-        console.error("getPushTokens Error:", err);
-        return [];
-      }
-    },
   },
 
   Mutation: {
@@ -265,46 +230,7 @@ export const resolvers = {
       }
     },
 
-    async savePushToken(_, { token }, context) {
-      try {
-        if (!context?.user) throw new Error("Unauthorized");
 
-        if (!token || typeof token !== "string") return false;
-
-        await pool.query(
-          `
-          INSERT INTO user_push_tokens (user_id, push_token)
-          VALUES ($1, $2)
-          ON CONFLICT (user_id, push_token) DO NOTHING
-          `,
-          [context.user.id, token],
-        );
-
-        return true;
-      } catch (err) {
-        console.error("savePushToken Error:", err);
-        return false;
-      }
-    },
-
-    async removePushToken(_, { token }, context) {
-      try {
-        if (!context?.user) throw new Error("Unauthorized");
-
-        await pool.query(
-          `
-          DELETE FROM user_push_tokens
-          WHERE user_id = $1 AND push_token = $2
-          `,
-          [context.user.id, token],
-        );
-
-        return true;
-      } catch (err) {
-        console.error("removePushToken Error:", err);
-        return false;
-      }
-    },
   },
 
   User: {

@@ -16,22 +16,18 @@ startStandaloneServer(server, {
 
   context: async ({ req }) => {
     const xUser = req.headers["x-user"];
-    const serviceSecret = req.headers["x-service-secret"];
-
-    console.log("📩 x-user:", xUser);
-    console.log("🔐 serviceSecret:", serviceSecret ? "YES" : "NO");
 
     let user = null;
 
     if (xUser) {
       try {
         user = JSON.parse(xUser);
-      } catch (err) {
-        console.log("❌ JSON parse error:", err.message);
+      } catch {
+        console.log("Invalid x-user header format");
       }
     }
 
-    return { user, serviceSecret };
+    return { user };
   },
 }).then(() => {
   console.log("User Service running on http://0.0.0.0:4001/graphql");

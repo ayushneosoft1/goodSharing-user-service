@@ -46,3 +46,33 @@ Error Handling Strategy (a) All errors are wrapped in structured API responses. 
 Final Mental Model (a) Stateless identity microservice. (b) Owns all user data and authentication logic (c) Issues authentication tokens(JWTs) (d) Resolves User entities for the entire system (e) Scales independently and horizontally (f) Integrates seamelessly with Apollo Federation
 
 Summary : The user Service is stateless, federated identity microservice that manages users,handles signup/signin securely, issues JWTs,and acts as the authoritative source for user data in a distributed GraphQL System.
+
+## Module 5 - PART C: Legacy Push Token Cleanup
+
+### Environment Configuration
+
+Configure the following environment variables before starting the service:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL database connection string |
+| `JWT_SECRET` | Secret used to sign authentication JWTs |
+| `REDIS_HOST` | Redis server hostname (default: `127.0.0.1`) |
+| `REDIS_PORT` | Redis server port (default: `6379`) |
+
+Use `.env.example` as the configuration template. Provide actual credentials and secrets through the local environment or approved secret-management mechanism. Do not commit real credentials.
+
+### Legacy Push Token API Removal
+
+The following obsolete Push Token GraphQL APIs and type have been removed:
+
+- `getPushTokens`
+- `savePushToken`
+- `removePushToken`
+- `PushToken`
+
+The associated `user_push_tokens` table is removed through the migration:
+
+`migrations/001_drop_user_push_tokens.sql`
+
+**Migration warning:** Applying this migration permanently deletes existing data in `user_push_tokens`. Review and approve the migration before applying it to any database. The migration file is provided for review and is not executed automatically by this documentation change.

@@ -6,7 +6,6 @@ export const typeDefs = gql`
 
     getAllUserDetails: UsersResponse
 
-    getPushTokens(userIds: [ID!]!): [PushToken!]!
   }
 
   type Mutation {
@@ -19,9 +18,7 @@ export const typeDefs = gql`
 
     signin(email: String!, password: String!): ApiResponse
 
-    savePushToken(token: String!): Boolean!
 
-    removePushToken(token: String!): Boolean!
   }
 
   type User @key(fields: "id") {
@@ -31,10 +28,6 @@ export const typeDefs = gql`
     last_name: String!
   }
 
-  type PushToken {
-    userId: ID!
-    pushToken: String!
-  }
 
   type UserResponse {
     status: String!
